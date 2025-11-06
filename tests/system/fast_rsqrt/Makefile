@@ -6,7 +6,7 @@ LINKER_SCRIPT = linker.ld
 EMU ?= ../../../build/rv32emu
 
 AFLAGS = -g $(ARCH)
-CFLAGS = -g -march=rv32i_zicsr
+CFLAGS = -g -Os -march=rv32i_zicsr
 LDFLAGS = -T $(LINKER_SCRIPT)
 EXEC = test.elf
 
@@ -15,6 +15,8 @@ AS = $(CROSS_COMPILE)as
 LD = $(CROSS_COMPILE)ld
 OBJDUMP = $(CROSS_COMPILE)objdump
 
+LIBGCC = $(shell riscv-none-elf-gcc -print-libgcc-file-name)
+
 OBJS = start.o main.o perfcounter.o fast_rsqrt.o
 
 .PHONY: all run dump clean
@@ -22,7 +24,7 @@ OBJS = start.o main.o perfcounter.o fast_rsqrt.o
 all: $(EXEC)
 
 $(EXEC): $(OBJS) $(LINKER_SCRIPT)
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBGCC)
 
 %.o: %.S
 	$(AS) $(AFLAGS) $< -o $@
