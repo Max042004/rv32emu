@@ -214,18 +214,47 @@ uint32_t answer[testcase_num] = {
 	4294967295, 65536, 32768, 29308, 1638, 65, 18, 1, 1, 1};
 
 void test_rsqrt() {
+	uint64_t start_cycles, end_cycles, cycles_elapsed;
+	uint64_t start_instret, end_instret, instret_elapsed;
+	uint32_t is_beyond_8percent = 0;
+	
 	for (int i = 0; i < testcase_num; i++) {
+		start_cycles = get_cycles();
+		start_instret = get_instret();
+		
 		uint32_t y = fast_rsqrt(testcase[i]);
+		
+		end_cycles = get_cycles();
+		end_instret = get_instret();
+		cycles_elapsed = end_cycles - start_cycles;
+		instret_elapsed = end_instret - start_instret;
+		
 		int32_t diff = y-answer[i];
+		int32_t relative_error = udiv(umul((unsigned long)(uint32_t) diff, 100), answer[i]);
+		if (relative_error > 8) is_beyond_8percent = 1;
+
 		TEST_LOGGER("== Testcase ");
 		print_dec((unsigned long) i);
 		TEST_LOGGER(" ==\nfast_rsqrt(");
 		print_dec((unsigned long) testcase[i]);
 		TEST_LOGGER("): ");
 		print_dec((unsigned long) y);
-		TEST_LOGGER("  , numerical diff: ");
+		TEST_LOGGER("  , numerical diff = ");
 		print_dec((unsigned long) diff);
+		TEST_LOGGER(" , relative error = ");
+		print_dec((unsigned long) relative_error);
+		TEST_LOGGER("%\n");
+		TEST_LOGGER("  Cycles: ");
+		print_dec((unsigned long) cycles_elapsed);
+		TEST_LOGGER("  Instructions: ");
+		print_dec((unsigned long) instret_elapsed);
 		TEST_LOGGER("\n\n");
+	}
+	if (is_beyond_8percent == 1) {
+		TEST_LOGGER("TEST FAILED, relative error too large\n");
+	}
+	else {
+		TEST_LOGGER("TEST SUCCUESSFUL\n");
 	}
 }
 
@@ -256,15 +285,8 @@ int main(void)
 
     /* Test Bare Metal C program */
     TEST_LOGGER("Test2: reciprocal square root C\n");
-    start_cycles = get_cycles();
-    start_instret = get_instret();
 
     test_rsqrt();
-
-    end_cycles = get_cycles();
-    end_instret = get_instret();
-    cycles_elapsed = end_cycles - start_cycles;
-    instret_elapsed = end_instret - start_instret;
 
     TEST_LOGGER("  Cycles: ");
     print_dec((unsigned long) cycles_elapsed);
