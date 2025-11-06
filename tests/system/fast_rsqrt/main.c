@@ -2,17 +2,19 @@
 #include <stdint.h>
 #include <string.h>
 
+#define COMPILER_BARRIER() asm volatile("" ::: "memory")
+
 #define printstr(ptr, length)                   \
     do {                                        \
         asm volatile(                           \
-            "add a7, x0, 0x40;"                 \
-            "add a0, x0, 0x1;" /* stdout */     \
-            "add a1, x0, %0;"                   \
+            "li a7, 0x40;"                 \
+            "li a0, 0x1;" /* stdout */     \
+            "mv a1, %0;"                   \
             "mv a2, %1;" /* length character */ \
             "ecall;"                            \
             :                                   \
             : "r"(ptr), "r"(length)             \
-            : "a0", "a1", "a2", "a7");          \
+            : "a0", "a1", "a2", "a7", "memory");          \
     } while (0)
 
 #define TEST_OUTPUT(msg, length) printstr(msg, length)
@@ -181,7 +183,7 @@ static const uint16_t rsqrt_table[32] = {
 };
 
 /* 65536/sqrt(x) */
-uint32_t fast_rsqrt(uint32_t x) {
+__attribute__((noinline)) uint32_t fast_rsqrt(uint32_t x) {
 	if (x == 0)
 		return 0xFFFFFFFF;
 	if (x == 1)
@@ -219,13 +221,18 @@ void test_rsqrt() {
 	uint32_t is_beyond_8percent = 0;
 	
 	for (int i = 0; i < testcase_num; i++) {
+		COMPILER_BARRIER();
 		start_cycles = get_cycles();
 		start_instret = get_instret();
+		COMPILER_BARRIER();
 		
-		uint32_t y = fast_rsqrt(testcase[i]);
+		uint32_t in = *(volatile uint32_t *)&testcase[i];
+		uint32_t y = fast_rsqrt(in);
 		
+		COMPILER_BARRIER();
 		end_cycles = get_cycles();
 		end_instret = get_instret();
+		COMPILER_BARRIER();
 		cycles_elapsed = end_cycles - start_cycles;
 		instret_elapsed = end_instret - start_instret;
 		
@@ -267,13 +274,17 @@ int main(void)
 
     /* Test assembly */
     TEST_LOGGER("Test1: reciprocal square root assembly\n");
+    COMPILER_BARRIER();
     start_cycles = get_cycles();
     start_instret = get_instret();
+    COMPILER_BARRIER();
 
     fast_rsqrt_asm();
 
+    COMPILER_BARRIER();
     end_cycles = get_cycles();
     end_instret = get_instret();
+    COMPILER_BARRIER();
     cycles_elapsed = end_cycles - start_cycles;
     instret_elapsed = end_instret - start_instret;
 
@@ -287,11 +298,6 @@ int main(void)
     TEST_LOGGER("Test2: reciprocal square root C\n");
 
     test_rsqrt();
-
-    TEST_LOGGER("  Cycles: ");
-    print_dec((unsigned long) cycles_elapsed);
-    TEST_LOGGER("  Instructions: ");
-    print_dec((unsigned long) instret_elapsed);
 
     TEST_LOGGER("\n=== Tests Completed ===\n");
 
