@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "rinv_sqrt_testcases.h"
 
 #define COMPILER_BARRIER() asm volatile("" ::: "memory")
 
@@ -182,13 +183,22 @@ static const uint16_t rsqrt_table[32] = {
 	2,	   1						   /* 2^30, 2^31 */
 };
 
+uint32_t newton_iter(uint32_t x, uint32_t y)
+{
+	uint32_t y2 = (uint32_t)mul32(y, y);		   // Q0.32
+	uint32_t xy2 = (uint32_t)(mul32(x, y2) >> 16); // Q16.16
+	uint64_t tmp = mul32(y, (3u << 16) - xy2);
+	y = (uint32_t)((tmp >> 17) + ((tmp >> 16) & 1));
+	return y;
+}
+
 /* 65536/sqrt(x) */
 __attribute__((noinline)) uint32_t fast_rsqrt(uint32_t x) {
 	if (x == 0)
 		return 0xFFFFFFFF;
 	if (x == 1)
 		return 65536;
-
+	
 	int exp = 31 - clz(x);
 	uint32_t y = rsqrt_table[exp]; // Q16.16
 
@@ -198,27 +208,31 @@ __attribute__((noinline)) uint32_t fast_rsqrt(uint32_t x) {
 		uint32_t frac =
 			(uint32_t)((((uint64_t)x - (1UL << exp)) << 16) >> exp);
 		y -= (uint32_t)(delta * frac) >> 16;
-		for (int iter = 0; iter < 2; iter++) {
-			uint32_t y2 = (uint32_t)mul32(y, y);		   // Q0.32
-			uint32_t xy2 = (uint32_t)(mul32(x, y2) >> 16); // Q16.16
-			uint64_t tmp = mul32(y, (3u << 16) - xy2);
-			y = (uint32_t)((tmp >> 17) + ((tmp >> 16) & 1));
+		if (x < 512) {			// 2^9
+			y = newton_iter(x, y);
+			y = newton_iter(x, y);		
+		}
+		else if (x < 33554432) {	// 2^25
+			y = newton_iter(x, y);
 		}
 	}
-
+	
 	return y;
 }
 
-#define testcase_num 10
-uint32_t testcase[testcase_num] = {
-	0, 1, 4, 5, 1600, 1000000, 12582912, 4294967293, 0xFFFFFFFE, 0xFFFFFFFF};
-uint32_t answer[testcase_num] = {
-	4294967295, 65536, 32768, 29308, 1638, 65, 18, 1, 1, 1};
+uint32_t relative_error(uint32_t y, uint32_t answer, uint32_t *diff,uint32_t *max_relative_error)
+{
+	if (y > answer) *diff = y - answer;
+	else *diff = answer- y;
+	int32_t relative_error = udiv(umul(*diff, 100), answer);
+	if (relative_error > *max_relative_error) *max_relative_error = relative_error;
+	return relative_error;	
+}
 
 void test_rsqrt() {
 	uint64_t start_cycles, end_cycles, cycles_elapsed;
 	uint64_t start_instret, end_instret, instret_elapsed;
-	uint32_t is_beyond_8percent = 0;
+	uint32_t max_relative_error = 0;
 	
 	for (int i = 0; i < testcase_num; i++) {
 		COMPILER_BARRIER();
@@ -226,8 +240,7 @@ void test_rsqrt() {
 		start_instret = get_instret();
 		COMPILER_BARRIER();
 		
-		uint32_t in = *(volatile uint32_t *)&testcase[i];
-		uint32_t y = fast_rsqrt(in);
+		uint32_t y = fast_rsqrt(testcase[i]);
 		
 		COMPILER_BARRIER();
 		end_cycles = get_cycles();
@@ -235,33 +248,35 @@ void test_rsqrt() {
 		COMPILER_BARRIER();
 		cycles_elapsed = end_cycles - start_cycles;
 		instret_elapsed = end_instret - start_instret;
-		
-		int32_t diff = y-answer[i];
-		int32_t relative_error = udiv(umul((unsigned long)(uint32_t) diff, 100), answer[i]);
-		if (relative_error > 8) is_beyond_8percent = 1;
 
-		TEST_LOGGER("== Testcase ");
-		print_dec((unsigned long) i);
-		TEST_LOGGER(" ==\nfast_rsqrt(");
-		print_dec((unsigned long) testcase[i]);
-		TEST_LOGGER("): ");
-		print_dec((unsigned long) y);
-		TEST_LOGGER("  , numerical diff = ");
-		print_dec((unsigned long) diff);
-		TEST_LOGGER(" , relative error = ");
-		print_dec((unsigned long) relative_error);
-		TEST_LOGGER("%\n");
-		TEST_LOGGER("  Cycles: ");
-		print_dec((unsigned long) cycles_elapsed);
-		TEST_LOGGER("  Instructions: ");
-		print_dec((unsigned long) instret_elapsed);
-		TEST_LOGGER("\n\n");
+		uint32_t diff;
+		uint32_t curr_re = relative_error(y, answer[i], &diff, &max_relative_error);
+
+		if (i < 11 || (curr_re > 7 && testcase[i] < 38797312)) {
+			TEST_LOGGER("== Testcase ");
+			print_dec((unsigned long) i);
+			TEST_LOGGER(" ==\nfast_rsqrt(");
+			print_dec((unsigned long) testcase[i]);
+			TEST_LOGGER("): ");
+			print_dec((unsigned long) y);
+			TEST_LOGGER("  , numerical diff = ");
+			print_dec((unsigned long) diff);
+			TEST_LOGGER(" , relative error = ");
+			print_dec((unsigned long) curr_re);
+			TEST_LOGGER("%\n");
+			TEST_LOGGER("  Cycles: ");
+			print_dec((unsigned long) cycles_elapsed);
+			TEST_LOGGER("  Instructions: ");
+			print_dec((unsigned long) instret_elapsed);
+			TEST_LOGGER("\n\n");	
+		}
 	}
-	if (is_beyond_8percent == 1) {
-		TEST_LOGGER("TEST FAILED, relative error too large\n");
+
+	if (max_relative_error >= 8) {
+		TEST_LOGGER("TEST FAILED, relative error larger than 8%\n");
 	}
 	else {
-		TEST_LOGGER("TEST SUCCUESSFUL\n");
+		TEST_LOGGER("TEST SUCCUESSFUL, relative error less than 8%\n");
 	}
 }
 
